@@ -1,4 +1,4 @@
-package com.example.face_detection
+package com.example.face_detection // Paket adınız
 
 import android.content.ContentValues
 import android.content.Context
@@ -11,23 +11,28 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -35,17 +40,23 @@ import com.example.face_detection.ui.theme.Face_detectionTheme
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import kotlinx.coroutines.delay
+
+// GÜNCELLENMİŞ VERİ SINIFI: Hata mesajını tutmak için yeni bir alan eklendi.
+data class PhotoItem(
+    val id: Int,
+    val uri: Uri? = null,
+    val isValid: Boolean? = null,
+    val errorMessage: String? = null // Geçersiz olma nedenini burada tutacağız.
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             Face_detectionTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    FaceAnalysisScreen()
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    PhotoGridScreen()
                 }
             }
         }
@@ -53,21 +64,23 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FaceAnalysisScreen() {
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
-    var resultText by remember { mutableStateOf("Bir fotoğraf seçin veya çekin.") }
-    var isLoading by remember { mutableStateOf(false) }
+fun PhotoGridScreen() {
+    // 1. Tüm state'ler ve launcher'lar burada, fonksiyonun en başında tanımlanır.
+    var photoList by remember { mutableStateOf((0..11).map { PhotoItem(id = it) }) }
+    var selectedPhotoId by remember { mutableStateOf<Int?>(null) }
+    var photoToShowDialog by remember { mutableStateOf<PhotoItem?>(null) }
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+    var bannerMessage by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
-
-    // Kamera için geçici URI tutacak bir state
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? ->
-            uri?.let {
-                imageUri = it
-                resultText = "Fotoğraf analiz edilmeye hazır."
+            if (uri != null && selectedPhotoId != null) {
+                photoList = photoList.map {
+                    if (it.id == selectedPhotoId) it.copy(uri = uri, isValid = null, errorMessage = null) else it
+                }
             }
         }
     )
@@ -75,61 +88,106 @@ fun FaceAnalysisScreen() {
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
         onResult = { isSuccess: Boolean ->
-            if (isSuccess) {
-                imageUri = tempCameraUri
-                resultText = "Fotoğraf analiz edilmeye hazır."
-            } else {
-                resultText = "Kamera işlemi iptal edildi."
+            if (isSuccess && selectedPhotoId != null) {
+                photoList = photoList.map {
+                    if (it.id == selectedPhotoId) it.copy(uri = tempCameraUri, isValid = null, errorMessage = null) else it
+                }
             }
         }
     )
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        if (imageUri == null) {
-            Image(
-                painter = painterResource(id = android.R.drawable.ic_menu_camera),
-                contentDescription = "Placeholder Fotoğraf",
-                modifier = Modifier
-                    .size(250.dp)
-                    .background(Color.LightGray),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            AsyncImage(
-                model = imageUri,
-                contentDescription = "Seçilen Fotoğraf",
-                modifier = Modifier.size(250.dp),
-                contentScale = ContentScale.Crop
-            )
-        }
-        Spacer(modifier = Modifier.height(20.dp))
-        if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.padding(vertical = 20.dp))
-        } else {
-            Spacer(modifier = Modifier.height(68.dp))
-        }
-        Text(
-            text = resultText,
-            fontSize = 18.sp,
-            style = MaterialTheme.typography.titleMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-        )
-        Spacer(modifier = Modifier.weight(1f))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(0.9f),
-            horizontalArrangement = Arrangement.SpaceEvenly
+    // 2. Tüm ana arayüz bileşenleri (Box, Column, Banner) burada yer alır.
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Button(onClick = { galleryLauncher.launch("image/*") }) {
-                Text(text = "Galeriden Seç")
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(photoList) { photoItem ->
+                    PhotoBox(
+                        photoItem = photoItem,
+                        onAddClick = {
+                            selectedPhotoId = photoItem.id
+                            showImageSourceDialog = true
+                        },
+                        onOptionsClick = {
+                            photoToShowDialog = photoItem
+                        },
+                        onInfoClick = { message ->
+                            bannerMessage = message
+                        }
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
+                    val photosToAnalyze = photoList.filter { it.uri != null }
+                    photosToAnalyze.forEach { photo ->
+                        analyzeFace(context, photo.uri!!) { isSuccess, message ->
+                            photoList = photoList.map {
+                                if (it.id == photo.id) it.copy(isValid = isSuccess, errorMessage = message) else it
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(0.8f)
+            ) {
+                Text(text = "Tümünü Analiz Et")
+            }
+        }
+
+        ErrorBanner(
+            message = bannerMessage,
+            onDismiss = { bannerMessage = null }
+        )
+    }
+
+    // 3. Tüm diyaloglar da burada, ana fonksiyonun içinde tanımlanır.
+    // Bu sayede yukarıda tanımlanan galleryLauncher gibi değişkenlere erişebilirler.
+    photoToShowDialog?.let { photoItem ->
+        AlertDialog(
+            onDismissRequest = { photoToShowDialog = null },
+            title = { Text("Fotoğraf Seçenekleri") },
+            text = { Text("Bu karedeki fotoğraf için ne yapmak istersiniz?") },
+            confirmButton = {
+                Button(onClick = {
+                    selectedPhotoId = photoItem.id
+                    // Burası artık hata vermeyecektir.
+                    galleryLauncher.launch("image/*")
+                    photoToShowDialog = null
+                }) {
+                    Text("Değiştir")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        photoList = photoList.map {
+                            if (it.id == photoItem.id) it.copy(uri = null, isValid = null, errorMessage = null) else it
+                        }
+                        photoToShowDialog = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Kaldır")
+                }
+            }
+        )
+    }
+
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Kaynak Seçin") },
+            text = { Text("Nereden fotoğraf eklemek istersiniz?") },
+            confirmButton = {
+                Button(onClick = {
                     val uri = createImageUri(context)
                     if (uri != null) {
                         tempCameraUri = uri
@@ -137,28 +195,108 @@ fun FaceAnalysisScreen() {
                     } else {
                         Toast.makeText(context, "Hata: Medya deposuna kayıt oluşturulamadı.", Toast.LENGTH_SHORT).show()
                     }
-                }
-            ) {
-                Text(text = "Fotoğraf Çek")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                imageUri?.let {
-                    isLoading = true
-                    analyzeFace(context, it) { _, message ->
-                        resultText = message
-                        isLoading = false
-                    }
+                    showImageSourceDialog = false
+                }) {
+                    Text("Kameradan Çek")
                 }
             },
-            enabled = imageUri != null && !isLoading,
-            modifier = Modifier.fillMaxWidth(0.8f)
+            dismissButton = {
+                Button(onClick = {
+                    // Burası da artık hata vermeyecektir.
+                    galleryLauncher.launch("image/*")
+                    showImageSourceDialog = false
+                }) {
+                    Text("Galeriden Seç")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun PhotoBox(
+    photoItem: PhotoItem,
+    onAddClick: () -> Unit,
+    onOptionsClick: () -> Unit,
+    onInfoClick: (String) -> Unit
+) {
+    val borderColor = when (photoItem.isValid) {
+        true -> Color.Green
+        false -> Color.Red
+        null -> Color.Gray
+    }
+
+    // Box, elemanları üst üste koymamızı sağlar.
+    Box(
+        modifier = Modifier
+            .aspectRatio(3f / 4f)
+            .background(Color.LightGray)
+            .border(2.dp, borderColor)
+            .clickable(onClick = { if (photoItem.uri == null) onAddClick() else onOptionsClick() }),
+        contentAlignment = Alignment.Center
+    ) {
+        if (photoItem.uri == null) {
+            Icon(imageVector = Icons.Default.Add, contentDescription = "Fotoğraf Ekle", tint = Color.DarkGray)
+        } else {
+            AsyncImage(model = photoItem.uri, contentDescription = "Seçilen Fotoğraf", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+
+            // YENİ: Fotoğraf geçersizse, sol üste ünlem ikonu ekle.
+            if (photoItem.isValid == false && photoItem.errorMessage != null) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Hata Bilgisi",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopStart) // Sol üste hizala
+                        .padding(4.dp)
+                        .background(Color.Red, CircleShape) // Kırmızı daire arka plan
+                        .clip(CircleShape)
+                        .clickable { onInfoClick(photoItem.errorMessage) } // Tıklanabilir yap
+                        .padding(2.dp)
+                        .size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+// YENİ: Hata mesajlarını gösterecek özel Banner Composable'ı
+@Composable
+fun BoxScope.ErrorBanner(message: String?, onDismiss: () -> Unit) {
+    AnimatedVisibility(
+        visible = message != null,
+        modifier = Modifier.align(Alignment.TopCenter),
+        enter = slideInVertically(initialOffsetY = { -it }),
+        exit = slideOutVertically(targetOffsetY = { -it })
+    ) {
+        // Banner'ın 4 saniye sonra otomatik olarak kaybolmasını sağlar.
+        LaunchedEffect(message) {
+            delay(4000)
+            onDismiss()
+        }
+
+        Surface(
+            modifier = Modifier.padding(top = 16.dp, start = 16.dp, end = 16.dp),
+            color = MaterialTheme.colorScheme.error,
+            shape = RoundedCornerShape(12.dp),
+            shadowElevation = 8.dp
         ) {
-            Text(text = "Yüzü Analiz Et")
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Hata",
+                    tint = MaterialTheme.colorScheme.onError
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = message ?: "",
+                    color = MaterialTheme.colorScheme.onError,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -195,10 +333,10 @@ private fun analyzeFace(context: Context, uri: Uri, onResult: (Boolean, String) 
         .addOnSuccessListener { faces ->
             when {
                 faces.isEmpty() -> {
-                    onResult(false, "Analiz Başarısız: Fotoğrafta yüz bulunamadı.")
+                    onResult(false, "Analiz Başarısız: Yüz bulunamadı.")
                 }
                 faces.size > 1 -> {
-                    onResult(false, "Analiz Başarısız: Lütfen sadece tek bir kişinin olduğu bir fotoğraf seçin.")
+                    onResult(false, "Analiz Başarısız: Birden fazla kişi var.")
                 }
                 else -> {
                     val face = faces.first()
@@ -212,15 +350,15 @@ private fun analyzeFace(context: Context, uri: Uri, onResult: (Boolean, String) 
                     val eulerZThreshold = 30.0f
 
                     if (kotlin.math.abs(eulerY) > eulerYThreshold) {
-                        onResult(false, "Analiz Başarısız: Yüz sağa veya sola çok dönük (yan profil).")
+                        onResult(false, "Hata: Yüz çok dönük.")
                         return@addOnSuccessListener
                     }
                     if (kotlin.math.abs(eulerX) > eulerXThreshold) {
-                        onResult(false, "Analiz Başarısız: Yüz yukarı veya aşağı çok bakıyor.")
+                        onResult(false, "Hata: Yüz eğik.")
                         return@addOnSuccessListener
                     }
                     if (kotlin.math.abs(eulerZ) > eulerZThreshold) {
-                        onResult(false, "Analiz Başarısız: Baş sağa veya sola çok yatık.")
+                        onResult(false, "Hata: Baş çok yatık.")
                         return@addOnSuccessListener
                     }
 
@@ -229,23 +367,15 @@ private fun analyzeFace(context: Context, uri: Uri, onResult: (Boolean, String) 
                     val eyeOpenThreshold = 0.4f
 
                     if (leftEyeOpenProb > eyeOpenThreshold && rightEyeOpenProb > eyeOpenThreshold) {
-                        onResult(true, "Analiz Başarılı: Fotoğraf tüm koşullara uygun.")
+                        onResult(true, "Geçerli")
                     } else {
-                        onResult(false, "Analiz Başarısız: Fotoğraftaki yüzün gözleri yeterince açık değil.")
+                        onResult(false, "Hata: Gözler kapalı.")
                     }
                 }
             }
         }
         .addOnFailureListener { e ->
             e.printStackTrace()
-            onResult(false, "Hata: ${e.localizedMessage}")
+            onResult(false, "Kritik Hata")
         }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun DefaultPreview() {
-    Face_detectionTheme {
-        FaceAnalysisScreen()
-    }
 }
