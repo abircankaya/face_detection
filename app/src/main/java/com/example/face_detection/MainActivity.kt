@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -75,7 +76,6 @@ fun PhotoGridScreen() {
 
     val photoComparator = compareBy<PhotoItem> { it.uri == null }.thenBy { it.id }
 
-    // YENİ: Tekli seçim için ayrı bir launcher
     val singlePhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? ->
@@ -89,7 +89,6 @@ fun PhotoGridScreen() {
         }
     )
 
-    // YENİ: Çoklu seçim için ayrı bir launcher
     val multiplePhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents(),
         onResult = { selectedUris: List<Uri> ->
@@ -129,8 +128,8 @@ fun PhotoGridScreen() {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 items(photoList, key = { it.id }) { photoItem ->
                     PhotoBox(
@@ -139,8 +138,12 @@ fun PhotoGridScreen() {
                             selectedPhotoId = photoItem.id
                             showImageSourceDialog = true
                         },
-                        onOptionsClick = {
-                            photoToShowDialog = photoItem
+                        onRemoveClick = {
+                            photoList = photoList
+                                .map {
+                                    if (it.id == photoItem.id) it.copy(uri = null, isValid = null, errorMessage = null) else it
+                                }
+                                .sortedWith(photoComparator)
                         },
                         onInfoClick = { message ->
                             bannerMessage = message
@@ -150,25 +153,40 @@ fun PhotoGridScreen() {
             }
             Spacer(modifier = Modifier.height(16.dp))
 
-            // YENİ: Galeriden Toplu Ekle Butonu
 
-
-            Spacer(modifier = Modifier.height(8.dp))
+            //foto sayisi kontorl
+            val gecerliFoto = photoList.count { it.isValid == true }
+            val sayiKontrol = gecerliFoto >= 12
+            val buttonText = if (sayiKontrol) {
+                "Next"
+            } else {
+                val kalan = 12 - gecerliFoto
+                "Upload $kalan more photos"
+            }
 
             Button(
                 onClick = {
-                    val photosToAnalyze = photoList.filter { it.uri != null }
-                    photosToAnalyze.forEach { photo ->
-                        analyzeFace(context, photo.uri!!) { isSuccess, message ->
-                            photoList = photoList.map {
-                                if (it.id == photo.id) it.copy(isValid = isSuccess, errorMessage = message) else it
+                    if (sayiKontrol) {
+                        Toast.makeText(context, "Next.", Toast.LENGTH_LONG).show()
+                    } else {
+                        val photosToAnalyze = photoList.filter { it.uri != null && it.isValid == null }
+                        if (photosToAnalyze.isEmpty() && photoList.any { it.uri != null }) {
+                            Toast.makeText(context, "12 adet geçerli fotoğraf yükle .", Toast.LENGTH_SHORT).show()
+                        } else {
+                            photosToAnalyze.forEach { photo ->
+                                analyzeFace(context, photo.uri!!) { isSuccess, message ->
+                                    photoList = photoList.map {
+                                        if (it.id == photo.id) it.copy(isValid = isSuccess, errorMessage = message) else it
+                                    }
+                                }
                             }
                         }
                     }
                 },
+                enabled = sayiKontrol || photoList.any { it.uri != null },
                 modifier = Modifier.fillMaxWidth(0.8f)
             ) {
-                Text(text = "Tümünü Analiz Et")
+                Text(text = buttonText)
             }
         }
         ErrorBanner(message = bannerMessage, onDismiss = { bannerMessage = null })
@@ -181,7 +199,7 @@ fun PhotoGridScreen() {
             confirmButton = {
                 Button(onClick = {
                     selectedPhotoId = photoItem.id
-                    singlePhotoLauncher.launch("image/*") // "Değiştir" butonu tekli seçimi kullanır
+                    singlePhotoLauncher.launch("image/*")
                     photoToShowDialog = null
                 }) { Text("Değiştir") }
             },
@@ -216,25 +234,20 @@ fun PhotoGridScreen() {
                 }) { Text("Kameradan Çek") }
             },
             dismissButton = {
-
-                Button(
-                    onClick = { multiplePhotoLauncher.launch("image/*")
-                            showImageSourceDialog = false},
-                ) {
-                    Text(text = "Galeriden Toplu Ekle")
-                }
+                Button(onClick = {
+                    multiplePhotoLauncher.launch("image/*")
+                    showImageSourceDialog = false
+                }) { Text("Galeriden Toplu Ekle") }
             }
         )
     }
 }
 
-// ... PhotoBox, ErrorBanner, createImageUri, ve analyzeFace fonksiyonları aynı kalıyor ...
-
 @Composable
 fun PhotoBox(
     photoItem: PhotoItem,
     onAddClick: () -> Unit,
-    onOptionsClick: () -> Unit,
+    onRemoveClick: () -> Unit,
     onInfoClick: (String) -> Unit
 ) {
     val borderColor = when (photoItem.isValid) {
@@ -243,12 +256,15 @@ fun PhotoBox(
         null -> Color.Gray
     }
 
+    val boxShape = RoundedCornerShape(8.dp)
+
     Box(
         modifier = Modifier
-            .aspectRatio(3f / 4f)
+            .size(width = 116.dp, height = 105.dp)
+            .clip(boxShape)
             .background(Color.LightGray)
-            .border(2.dp, borderColor)
-            .clickable { if (photoItem.uri == null) onAddClick() else onOptionsClick() },
+            .border(2.dp, borderColor, shape = boxShape)
+            .clickable(enabled = photoItem.uri == null) { onAddClick() },
         contentAlignment = Alignment.Center
     ) {
         if (photoItem.uri == null) {
@@ -269,6 +285,25 @@ fun PhotoBox(
                         .clickable { onInfoClick(photoItem.errorMessage) }
                         .padding(2.dp)
                         .size(20.dp)
+                )
+            }
+
+            IconButton(
+                onClick = onRemoveClick,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Kaldır",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .padding(4.dp)
                 )
             }
         }
