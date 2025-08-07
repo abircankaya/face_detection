@@ -33,14 +33,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.face_detection.ui.theme.Face_detectionTheme
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.coroutines.delay
-
 
 data class PhotoItem(
     val id: Int,
@@ -64,7 +65,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun PhotoGridScreen() {
-    var photoList by remember { mutableStateOf((0..29).map { PhotoItem(id = it) }) } // max 20 adet resim eklenebilir
+    var photoList by remember { mutableStateOf((0..29).map { PhotoItem(id = it) }) }
     var selectedPhotoId by remember { mutableStateOf<Int?>(null) }
     var photoToShowDialog by remember { mutableStateOf<PhotoItem?>(null) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
@@ -72,13 +73,37 @@ fun PhotoGridScreen() {
     val context = LocalContext.current
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
-    val galleryLauncher = rememberLauncherForActivityResult(
+    val photoComparator = compareBy<PhotoItem> { it.uri == null }.thenBy { it.id }
+
+    // YENİ: Tekli seçim için ayrı bir launcher
+    val singlePhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? ->
             if (uri != null && selectedPhotoId != null) {
-                photoList = photoList.map {
-                    if (it.id == selectedPhotoId) it.copy(uri = uri, isValid = null, errorMessage = null) else it
+                photoList = photoList
+                    .map {
+                        if (it.id == selectedPhotoId) it.copy(uri = uri, isValid = null, errorMessage = null) else it
+                    }
+                    .sortedWith(photoComparator)
+            }
+        }
+    )
+
+    // YENİ: Çoklu seçim için ayrı bir launcher
+    val multiplePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents(),
+        onResult = { selectedUris: List<Uri> ->
+            if (selectedUris.isNotEmpty()) {
+                val emptySlots = photoList.filter { it.uri == null }
+                val slotsToFill = emptySlots.zip(selectedUris)
+                val newList = photoList.toMutableList()
+                slotsToFill.forEach { (slot, uri) ->
+                    val index = newList.indexOfFirst { it.id == slot.id }
+                    if (index != -1) {
+                        newList[index] = slot.copy(uri = uri, isValid = null, errorMessage = null)
+                    }
                 }
+                photoList = newList.sortedWith(photoComparator)
             }
         }
     )
@@ -87,14 +112,15 @@ fun PhotoGridScreen() {
         contract = ActivityResultContracts.TakePicture(),
         onResult = { isSuccess: Boolean ->
             if (isSuccess && selectedPhotoId != null) {
-                photoList = photoList.map {
-                    if (it.id == selectedPhotoId) it.copy(uri = tempCameraUri, isValid = null, errorMessage = null) else it
-                }
+                photoList = photoList
+                    .map {
+                        if (it.id == selectedPhotoId) it.copy(uri = tempCameraUri, isValid = null, errorMessage = null) else it
+                    }
+                    .sortedWith(photoComparator)
             }
         }
     )
 
-    // 2. Tüm ana arayüz bileşenleri (Box, Column, Banner) burada yer alır.
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -106,7 +132,7 @@ fun PhotoGridScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(photoList) { photoItem ->
+                items(photoList, key = { it.id }) { photoItem ->
                     PhotoBox(
                         photoItem = photoItem,
                         onAddClick = {
@@ -123,6 +149,12 @@ fun PhotoGridScreen() {
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
+
+            // YENİ: Galeriden Toplu Ekle Butonu
+
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             Button(
                 onClick = {
                     val photosToAnalyze = photoList.filter { it.uri != null }
@@ -139,39 +171,32 @@ fun PhotoGridScreen() {
                 Text(text = "Tümünü Analiz Et")
             }
         }
-
-        ErrorBanner(
-            message = bannerMessage,
-            onDismiss = { bannerMessage = null }
-        )
+        ErrorBanner(message = bannerMessage, onDismiss = { bannerMessage = null })
     }
 
     photoToShowDialog?.let { photoItem ->
         AlertDialog(
             onDismissRequest = { photoToShowDialog = null },
             title = { Text("Fotoğraf Seçenekleri") },
-            text = { Text("Bu karedeki fotoğraf için ne yapmak istersiniz?") },
             confirmButton = {
                 Button(onClick = {
                     selectedPhotoId = photoItem.id
-                    galleryLauncher.launch("image/*")
+                    singlePhotoLauncher.launch("image/*") // "Değiştir" butonu tekli seçimi kullanır
                     photoToShowDialog = null
-                }) {
-                    Text("Değiştir")
-                }
+                }) { Text("Değiştir") }
             },
             dismissButton = {
                 Button(
                     onClick = {
-                        photoList = photoList.map {
-                            if (it.id == photoItem.id) it.copy(uri = null, isValid = null, errorMessage = null) else it
-                        }
+                        photoList = photoList
+                            .map {
+                                if (it.id == photoItem.id) it.copy(uri = null, isValid = null, errorMessage = null) else it
+                            }
+                            .sortedWith(photoComparator)
                         photoToShowDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Kaldır")
-                }
+                ) { Text("Kaldır") }
             }
         )
     }
@@ -180,32 +205,30 @@ fun PhotoGridScreen() {
         AlertDialog(
             onDismissRequest = { showImageSourceDialog = false },
             title = { Text("Kaynak Seçin") },
-            text = { Text("Nereden fotoğraf eklemek istersiniz?") },
             confirmButton = {
                 Button(onClick = {
                     val uri = createImageUri(context)
                     if (uri != null) {
                         tempCameraUri = uri
                         cameraLauncher.launch(uri)
-                    } else {
-                        Toast.makeText(context, "Hata: Medya deposuna kayıt oluşturulamadı.", Toast.LENGTH_SHORT).show()
                     }
                     showImageSourceDialog = false
-                }) {
-                    Text("Kameradan Çek")
-                }
+                }) { Text("Kameradan Çek") }
             },
             dismissButton = {
-                Button(onClick = {
-                    galleryLauncher.launch("image/*")
-                    showImageSourceDialog = false
-                }) {
-                    Text("Galeriden Seç")
+
+                Button(
+                    onClick = { multiplePhotoLauncher.launch("image/*")
+                            showImageSourceDialog = false},
+                ) {
+                    Text(text = "Galeriden Toplu Ekle")
                 }
             }
         )
     }
 }
+
+// ... PhotoBox, ErrorBanner, createImageUri, ve analyzeFace fonksiyonları aynı kalıyor ...
 
 @Composable
 fun PhotoBox(
@@ -220,21 +243,19 @@ fun PhotoBox(
         null -> Color.Gray
     }
 
-    // Box, elemanları üst üste koymamızı sağlar.
     Box(
         modifier = Modifier
-            .aspectRatio(3f / 4f) // 1f dene
+            .aspectRatio(3f / 4f)
             .background(Color.LightGray)
             .border(2.dp, borderColor)
-            .clickable(onClick = { if (photoItem.uri == null) onAddClick() else onOptionsClick() }),
+            .clickable { if (photoItem.uri == null) onAddClick() else onOptionsClick() },
         contentAlignment = Alignment.Center
     ) {
         if (photoItem.uri == null) {
-            Icon(imageVector = Icons.Default.Add, contentDescription = "Fotoğraf Ekle", tint = Color.DarkGray)
+            Icon(imageVector = Icons.Default.Add, contentDescription = "Boş Kare", tint = Color.DarkGray)
         } else {
             AsyncImage(model = photoItem.uri, contentDescription = "Seçilen Fotoğraf", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
 
-            // Fotoğraf geçersizse, sol üste ünlem ikonu ekle.
             if (photoItem.isValid == false && photoItem.errorMessage != null) {
                 Icon(
                     imageVector = Icons.Default.Warning,
@@ -254,7 +275,6 @@ fun PhotoBox(
     }
 }
 
-//  Hata mesaj banner
 @Composable
 fun BoxScope.ErrorBanner(message: String?, onDismiss: () -> Unit) {
     AnimatedVisibility(
@@ -263,12 +283,10 @@ fun BoxScope.ErrorBanner(message: String?, onDismiss: () -> Unit) {
         enter = slideInVertically(initialOffsetY = { -it }),
         exit = slideOutVertically(targetOffsetY = { -it })
     ) {
-
         LaunchedEffect(message) {
-            delay(3000)  //banner 3 sn sonra gider
+            delay(3000)
             onDismiss()
         }
-
         Surface(
             modifier = Modifier.padding(top = 16.dp, start = 16.dp, end = 16.dp),
             color = MaterialTheme.colorScheme.error,
@@ -279,17 +297,9 @@ fun BoxScope.ErrorBanner(message: String?, onDismiss: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = "Hata",
-                    tint = MaterialTheme.colorScheme.onError
-                )
+                Icon(imageVector = Icons.Default.Warning, contentDescription = "Hata", tint = MaterialTheme.colorScheme.onError)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = message ?: "",
-                    color = MaterialTheme.colorScheme.onError,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = message ?: "", color = MaterialTheme.colorScheme.onError, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -326,44 +336,21 @@ private fun analyzeFace(context: Context, uri: Uri, onResult: (Boolean, String) 
     detector.process(image)
         .addOnSuccessListener { faces ->
             when {
-                faces.isEmpty() -> {
-                    onResult(false, "Analiz Başarısız: Yüz bulunamadı.")
-                }
-                faces.size > 1 -> {
-                    onResult(false, "Analiz Başarısız: Birden fazla kişi var.")
-                }
+                faces.isEmpty() -> { onResult(false, "Yüz bulunamadı.") }
+                faces.size > 1 -> { onResult(false, "Birden fazla kişi var.") }
                 else -> {
                     val face = faces.first()
-
-                    val eulerY = face.headEulerAngleY
-                    val eulerX = face.headEulerAngleX
-                    val eulerZ = face.headEulerAngleZ
-
-                    val eulerYThreshold = 30.0f
-                    val eulerXThreshold = 30.0f
-                    val eulerZThreshold = 30.0f
-
-                    if (kotlin.math.abs(eulerY) > eulerYThreshold) {
-                        onResult(false, "Hata: Yüz çok dönük.")
-                        return@addOnSuccessListener
-                    }
-                    if (kotlin.math.abs(eulerX) > eulerXThreshold) {
-                        onResult(false, "Hata: Yüz eğik.")
-                        return@addOnSuccessListener
-                    }
-                    if (kotlin.math.abs(eulerZ) > eulerZThreshold) {
-                        onResult(false, "Hata: Baş çok yatık.")
-                        return@addOnSuccessListener
-                    }
-
-                    val leftEyeOpenProb = face.leftEyeOpenProbability ?: 0.0f
-                    val rightEyeOpenProb = face.rightEyeOpenProbability ?: 0.0f
+                    val eulerY = face.headEulerAngleY; val eulerX = face.headEulerAngleX; val eulerZ = face.headEulerAngleZ
+                    val eulerYThreshold = 30.0f; val eulerXThreshold = 30.0f; val eulerZThreshold = 30.0f
+                    if (kotlin.math.abs(eulerY) > eulerYThreshold) { onResult(false, "Yüz çok dönük."); return@addOnSuccessListener }
+                    if (kotlin.math.abs(eulerX) > eulerXThreshold) { onResult(false, "Yüz eğik."); return@addOnSuccessListener }
+                    if (kotlin.math.abs(eulerZ) > eulerZThreshold) { onResult(false, "Baş çok yatık."); return@addOnSuccessListener }
+                    val leftEyeOpenProb = face.leftEyeOpenProbability ?: 0.0f; val rightEyeOpenProb = face.rightEyeOpenProbability ?: 0.0f
                     val eyeOpenThreshold = 0.4f
-
                     if (leftEyeOpenProb > eyeOpenThreshold && rightEyeOpenProb > eyeOpenThreshold) {
                         onResult(true, "Geçerli")
                     } else {
-                        onResult(false, "Hata: Gözler kapalı.")
+                        onResult(false, "Gözler kapalı.")
                     }
                 }
             }
@@ -372,4 +359,12 @@ private fun analyzeFace(context: Context, uri: Uri, onResult: (Boolean, String) 
             e.printStackTrace()
             onResult(false, "Kritik Hata")
         }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DefaultPreview() {
+    Face_detectionTheme {
+        PhotoGridScreen()
+    }
 }
