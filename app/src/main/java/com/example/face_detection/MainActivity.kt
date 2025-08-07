@@ -34,7 +34,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.face_detection.ui.theme.Face_detectionTheme
 import com.google.mlkit.vision.common.InputImage
@@ -42,12 +41,12 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.coroutines.delay
 
-// GÜNCELLENMİŞ VERİ SINIFI: Hata mesajını tutmak için yeni bir alan eklendi.
+
 data class PhotoItem(
     val id: Int,
     val uri: Uri? = null,
     val isValid: Boolean? = null,
-    val errorMessage: String? = null // Geçersiz olma nedenini burada tutacağız.
+    val errorMessage: String? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -66,7 +65,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PhotoGridScreen() {
     // 1. Tüm state'ler ve launcher'lar burada, fonksiyonun en başında tanımlanır.
-    var photoList by remember { mutableStateOf((0..11).map { PhotoItem(id = it) }) }
+    var photoList by remember { mutableStateOf((0..20).map { PhotoItem(id = it) }) } // max 20 adet resim eklenebilir
     var selectedPhotoId by remember { mutableStateOf<Int?>(null) }
     var photoToShowDialog by remember { mutableStateOf<PhotoItem?>(null) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
@@ -269,9 +268,9 @@ fun BoxScope.ErrorBanner(message: String?, onDismiss: () -> Unit) {
         enter = slideInVertically(initialOffsetY = { -it }),
         exit = slideOutVertically(targetOffsetY = { -it })
     ) {
-        // Banner'ın 4 saniye sonra otomatik olarak kaybolmasını sağlar.
+
         LaunchedEffect(message) {
-            delay(4000)
+            delay(3000)  //banner 3 sn sonra gider
             onDismiss()
         }
 
