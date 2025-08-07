@@ -64,8 +64,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun PhotoGridScreen() {
-    // 1. Tüm state'ler ve launcher'lar burada, fonksiyonun en başında tanımlanır.
-    var photoList by remember { mutableStateOf((0..20).map { PhotoItem(id = it) }) } // max 20 adet resim eklenebilir
+    var photoList by remember { mutableStateOf((0..29).map { PhotoItem(id = it) }) } // max 20 adet resim eklenebilir
     var selectedPhotoId by remember { mutableStateOf<Int?>(null) }
     var photoToShowDialog by remember { mutableStateOf<PhotoItem?>(null) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
@@ -147,8 +146,6 @@ fun PhotoGridScreen() {
         )
     }
 
-    // 3. Tüm diyaloglar da burada, ana fonksiyonun içinde tanımlanır.
-    // Bu sayede yukarıda tanımlanan galleryLauncher gibi değişkenlere erişebilirler.
     photoToShowDialog?.let { photoItem ->
         AlertDialog(
             onDismissRequest = { photoToShowDialog = null },
@@ -157,7 +154,6 @@ fun PhotoGridScreen() {
             confirmButton = {
                 Button(onClick = {
                     selectedPhotoId = photoItem.id
-                    // Burası artık hata vermeyecektir.
                     galleryLauncher.launch("image/*")
                     photoToShowDialog = null
                 }) {
@@ -201,7 +197,6 @@ fun PhotoGridScreen() {
             },
             dismissButton = {
                 Button(onClick = {
-                    // Burası da artık hata vermeyecektir.
                     galleryLauncher.launch("image/*")
                     showImageSourceDialog = false
                 }) {
@@ -228,7 +223,7 @@ fun PhotoBox(
     // Box, elemanları üst üste koymamızı sağlar.
     Box(
         modifier = Modifier
-            .aspectRatio(3f / 4f)
+            .aspectRatio(3f / 4f) // 1f dene
             .background(Color.LightGray)
             .border(2.dp, borderColor)
             .clickable(onClick = { if (photoItem.uri == null) onAddClick() else onOptionsClick() }),
@@ -239,18 +234,18 @@ fun PhotoBox(
         } else {
             AsyncImage(model = photoItem.uri, contentDescription = "Seçilen Fotoğraf", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
 
-            // YENİ: Fotoğraf geçersizse, sol üste ünlem ikonu ekle.
+            // Fotoğraf geçersizse, sol üste ünlem ikonu ekle.
             if (photoItem.isValid == false && photoItem.errorMessage != null) {
                 Icon(
                     imageVector = Icons.Default.Warning,
                     contentDescription = "Hata Bilgisi",
                     tint = Color.White,
                     modifier = Modifier
-                        .align(Alignment.TopStart) // Sol üste hizala
+                        .align(Alignment.TopStart)
                         .padding(4.dp)
-                        .background(Color.Red, CircleShape) // Kırmızı daire arka plan
+                        .background(Color.Red, CircleShape)
                         .clip(CircleShape)
-                        .clickable { onInfoClick(photoItem.errorMessage) } // Tıklanabilir yap
+                        .clickable { onInfoClick(photoItem.errorMessage) }
                         .padding(2.dp)
                         .size(20.dp)
                 )
@@ -259,7 +254,7 @@ fun PhotoBox(
     }
 }
 
-// YENİ: Hata mesajlarını gösterecek özel Banner Composable'ı
+//  Hata mesaj banner
 @Composable
 fun BoxScope.ErrorBanner(message: String?, onDismiss: () -> Unit) {
     AnimatedVisibility(
